@@ -1,0 +1,11 @@
+includes:
+  - base.yaml
+targets:
+  - target: /bin
+    copy:
+      - files:
+        - ../gluesql-test/target/x86_64-unknown-linux-musl/debug/gluesql-test
+        - ../gluesql-test/data-num10.json
+        - ../gluesql-test/data-FRqwI11L_LlTU-GWNV0sz.json
+      - dirs:
+        - ../sled
