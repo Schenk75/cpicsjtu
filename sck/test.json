@@ -1,0 +1,21 @@
+
+{
+	"DATE": "25/11/2020",
+	"TIME": "10:47:40",
+	"air_humidity": 77.8197,
+	"air_temperature": -1.0029,
+	"atmosphere": 1090.073,
+	"co": 16.26,
+	"no2": 11,
+	"o3": 9,
+	"pm10": 60.0,
+	"pm25": 51,
+	"rainfall": 15,
+	"so2": 5.2,
+	"soil_ec": 2.14,
+	"soil_humidity": 51.5,
+	"soil_ph": 2.68,
+	"soil_temperature": 15.89,
+	"wind_direction": 53.5,
+	"wind_speed": 0.61
+}
