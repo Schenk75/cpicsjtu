@@ -25,24 +25,36 @@ pub extern "C" fn upgrade() {
 }
 
 struct Fact {
-    file_hash: String,
+    file_sig: String,
     file_data: String,
     file_name: String,
+    pubkey: String,
     time: i32,
     ec: EasyCodec,
 }
 
+#[allow(dead_code)]
+struct Data {
+    sig: String,
+    data: String,
+    pubkey: String,
+    ec: EasyCodec,
+}
+
+#[allow(dead_code)]
 impl Fact {
-    fn new_fact(file_hash: String, file_data: String, file_name: String, time: i32) -> Fact {
+    fn new_fact(file_sig: String, file_data: String, file_name: String, pubkey: String, time: i32) -> Fact {
         let mut ec = EasyCodec::new();
-        ec.add_string("file_hash", file_hash.as_str());
+        ec.add_string("file_sig", file_sig.as_str());
         ec.add_string("file_data", file_data.as_str());
         ec.add_string("file_name", file_name.as_str());
+        ec.add_string("pubkey", pubkey.as_str());
         ec.add_i32("time", time);
         Fact {
-            file_hash,
+            file_sig,
             file_data,
             file_name,
+            pubkey,
             time,
             ec,
         }
@@ -50,9 +62,10 @@ impl Fact {
 
     fn get_emit_event_data(&self) -> Vec<String> {
         let mut arr: Vec<String> = Vec::new();
-        arr.push(self.file_hash.clone());
+        arr.push(self.file_sig.clone());
         arr.push(self.file_data.clone());
         arr.push(self.file_name.clone());
+        arr.push(self.pubkey.clone());
         arr.push(self.time.to_string());
         arr
     }
@@ -68,10 +81,53 @@ impl Fact {
     fn unmarshal(data: &Vec<u8>) -> Fact {
         let ec = EasyCodec::new_with_bytes(data);
         Fact {
-            file_hash: ec.get_string("file_hash").unwrap(),
+            file_sig: ec.get_string("file_sig").unwrap(),
             file_data: ec.get_string("file_data").unwrap(),
             file_name: ec.get_string("file_name").unwrap(),
+            pubkey:    ec.get_string("pubkey").unwrap(),
             time: ec.get_i32("time").unwrap(),
+            ec,
+        }
+    }
+}
+
+#[allow(dead_code)]
+impl Data {
+    fn new_data(sig: String, data: String, pubkey: String) -> Data {
+        let mut ec = EasyCodec::new();
+        ec.add_string("sig", sig.as_str());
+        ec.add_string("data", data.as_str());
+        ec.add_string("pubkey", pubkey.as_str());
+        Data {
+            sig,
+            data,
+            pubkey,
+            ec,
+        }
+    }
+
+    fn get_emit_event_data(&self) -> Vec<String> {
+        let mut arr: Vec<String> = Vec::new();
+        arr.push(self.sig.clone());
+        arr.push(self.data.clone());
+        arr.push(self.pubkey.clone());
+        arr
+    }
+
+    fn to_json(&self) -> String {
+        self.ec.to_json()
+    }
+
+    fn marshal(&self) -> Vec<u8> {
+        self.ec.marshal()
+    }
+
+    fn unmarshal(data: &Vec<u8>) -> Data {
+        let ec = EasyCodec::new_with_bytes(data);
+        Data {
+            sig: ec.get_string("sig").unwrap(),
+            data: ec.get_string("data").unwrap(),
+            pubkey: ec.get_string("pubkey").unwrap(),
             ec,
         }
     }
@@ -84,9 +140,10 @@ pub extern "C" fn save() {
     let ctx = &mut sim_context::get_sim_context();
 
     // 获取传入参数
-    let file_hash = ctx.arg_as_utf8_str("file_hash");
+    let file_sig = ctx.arg_as_utf8_str("file_sig");
     let file_data = ctx.arg_as_utf8_str("file_data");
     let file_name = ctx.arg_as_utf8_str("file_name");
+    let pubkey = ctx.arg_as_utf8_str("pubkey");
     let time_str = ctx.arg_as_utf8_str("time");
 
     // 构造结构体
@@ -98,7 +155,7 @@ pub extern "C" fn save() {
         return;
     }
     let time: i32 = r_i32.unwrap();
-    let fact = Fact::new_fact(file_hash, file_data, file_name, time);
+    let fact = Fact::new_fact(file_sig, file_data, file_name, pubkey, time);
 
     // 事件
     ctx.emit_event("topic_vx", &fact.get_emit_event_data());
@@ -111,49 +168,7 @@ pub extern "C" fn save() {
     );
 }
 
-// find_by_file_hash 根据file_hash查询存证数据
-#[no_mangle]
-pub extern "C" fn find_by_file_hash() {
-    // 获取上下文
-    let ctx = &mut sim_context::get_sim_context();
-
-    // 获取传入参数
-    let file_hash = ctx.arg_as_utf8_str("file_hash");
-
-    // 校验参数
-    if file_hash.len() == 0 {
-        ctx.log("file_hash is null");
-        ctx.ok("".as_bytes());
-        return;
-    }
-
-    // 查询
-    let r = ctx.get_state("fact_ec", &file_hash);
-
-    // 校验返回结果
-    if r.is_err() {
-        ctx.log("get_state fail");
-        ctx.error("get_state fail");
-        return;
-    }
-    let fact_vec = r.unwrap();
-    if fact_vec.len() == 0 {
-        ctx.log("None");
-        ctx.ok("".as_bytes());
-        return;
-    }
-
-    // 查询
-    let r = ctx.get_state("fact_ec", &file_hash).unwrap();
-    let fact = Fact::unmarshal(&r);
-    let json_str = fact.to_json();
-
-    // 返回查询结果
-    ctx.ok(json_str.as_bytes());
-    ctx.log(&json_str);
-}
-
-// find_by_file_name 根据file_name查询存证数据
+// 根据file_name查询存证数据
 #[no_mangle]
 pub extern "C" fn find_by_file_name() {
     // 获取上下文
@@ -187,7 +202,9 @@ pub extern "C" fn find_by_file_name() {
 
     // 查询
     let fact = Fact::unmarshal(&fact_vec);
-    let json_str = fact.to_json();
+    // let json_str = fact.to_json();
+    let return_val = Data::new_data(fact.file_sig, fact.file_data, fact.pubkey);
+    let json_str = return_val.to_json();
 
     // 返回查询结果
     ctx.ok(json_str.as_bytes());
