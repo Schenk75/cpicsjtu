@@ -8,6 +8,7 @@ SPDX-License-Identifier: Apache-2.0
 package main
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/sha256"
@@ -29,30 +30,33 @@ import (
 )
 
 const (
-	createContractTimeout = 5
-	claimContractName     = "upload001"
-	claimVersion          = "2.0.0"
-	claimByteCodePath     = "./contract/chainmaker_contract.wasm"
-	dataPath			  = "/root/jwzhou/paho.mqtt.c/occlum_instance/result_json/"
+	createContractTimeout    = 5
+	claimContractName        = "upload001"
+	claimVersion             = "2.0.0"
+	claimByteCodePath        = "./contract/upload.wasm"
+	dataPath                 = "/root/jwzhou/paho.mqtt.c/occlum_instance/result_json/"
 	sdkConfigOrg1Client1Path = "../sdk_configs/sdk_config_org1_client1.yml"
 )
 
 type FileData struct {
 	Data Data `json:"DATA"`
-	Sig Sig `json:"SIG"`
-	Pk Pk `json:"PK"`
+	Sig  Sig  `json:"SIG"`
+	Pk   Pk   `json:"PK"`
 }
 
 type Data struct {
-	AvgTemp string `json:"avg(temp)"`
-	MinTemp string `json:"min(temp)"`
-	MaxTemp string `json:"max(temp)"`
-	AvgHum  string `json:"avg(hum)"`
-	MinHum  string `json:"min(hum)"`
-	MaxHum  string `json:"max(hum)"`
-	AvgLig  string `json:"avg(lig)"`
-	MinLig  string `json:"min(lig)"`
-	MaxLig  string `json:"max(lig)"`
+	AvgTemp      string `json:"avg(temp)"`
+	MinTemp      string `json:"min(temp)"`
+	MaxTemp      string `json:"max(temp)"`
+	AvgHum       string `json:"avg(hum)"`
+	MinHum       string `json:"min(hum)"`
+	MaxHum       string `json:"max(hum)"`
+	AvgLig       string `json:"avg(lig)"`
+	MinLig       string `json:"min(lig)"`
+	MaxLig       string `json:"max(lig)"`
+	SerialNumber string `json:"serialNumber"`
+	SensorType   string `json:"sensorType"`
+	SensorModel  string `json:"sensorModel"`
 }
 
 // type Data struct {
@@ -103,24 +107,25 @@ func uploadData(data string) {
 		log.Fatalln(err)
 	}
 
-	fmt.Println("====================== 创建合约 ======================")
-	usernames := []string{examples.UserNameOrg1Admin1, examples.UserNameOrg2Admin1, examples.UserNameOrg3Admin1, examples.UserNameOrg4Admin1}
-	create(client, true, usernames...)
+	// fmt.Println("====================== 创建合约 ======================")
+	// usernames := []string{examples.UserNameOrg1Admin1, examples.UserNameOrg2Admin1, examples.UserNameOrg3Admin1, examples.UserNameOrg4Admin1}
+	// create(client, true, usernames...)
 
 	fmt.Println("====================== 调用合约 ======================")
 	fileName, err := invoke(client, "save", true, data)
 	if err != nil {
 		log.Fatalln(err)
 	}
+	fmt.Println(fileName)
 
-	fmt.Println("====================== 执行合约查询接口 ======================")
-	kvs := []*common.KeyValuePair{
-		{
-			Key:   "file_name",
-			Value: []byte(fileName),
-		},
-	}
-	query(client, "find_by_file_name", kvs)
+	// fmt.Println("====================== 执行合约查询接口 ======================")
+	// kvs := []*common.KeyValuePair{
+	// 	{
+	// 		Key:   "file_name",
+	// 		Value: []byte(fileName),
+	// 	},
+	// }
+	// query(client, "find_by_file_name", kvs)
 }
 
 // 创建合约
@@ -135,7 +140,7 @@ func create(client *sdk.ChainClient, withSyncResult bool, usernames ...string) {
 		}
 		log.Fatalln(err)
 	}
-	
+
 	fmt.Printf("CREATE claim contract resp: %+v\n", resp)
 }
 
@@ -172,23 +177,28 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data st
 	curTime := strconv.FormatInt(time.Now().Unix(), 10)
 
 	f, err := os.Open(dataPath + data)
-	
-	// f, err := os.Open(dataPath + "20220117T092445Z.json")
-    if err != nil {
-        fmt.Printf("Cannot open file [Err:%s]", err.Error())
-        return "", err
-    }
-    defer f.Close()
+
+	if err != nil {
+		fmt.Printf("Cannot open file [Err:%s]", err.Error())
+		return "", err
+	}
+	defer f.Close()
 	byteValue, _ := ioutil.ReadAll(f)
 
 	var fdata FileData
 	err = json.Unmarshal(byteValue, &fdata)
 	if err != nil {
-        fmt.Println("Unmarshal fail", err.Error())
-    }
+		fmt.Println("Unmarshal fail", err.Error())
+	}
+	// fmt.Printf("fdata: %+v\n", fdata)
 
-	fileData, _ := json.Marshal(fdata.Data)
-	// fmt.Println(string(fileData))
+	bf := bytes.NewBuffer([]byte{})
+	jsonEncoder := json.NewEncoder(bf)
+	jsonEncoder.SetEscapeHTML(false)
+	jsonEncoder.Encode(fdata.Data)
+	fileData := []byte(strings.TrimSpace(bf.String()))
+	// fmt.Println(fileData)
+
 	fileName := fmt.Sprintf("file_%s", curTime)
 
 	// fmt.Println(fdata)
@@ -196,15 +206,15 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data st
 	x := new(big.Int).SetBytes(ParseStr(fdata.Pk.PKR))
 	y := new(big.Int).SetBytes(ParseStr(fdata.Pk.PKS))
 
-	pubkey := ecdsa.PublicKey {
+	pubkey := ecdsa.PublicKey{
 		Curve: elliptic.P256(),
-		X: x,
-		Y: y,
+		X:     x,
+		Y:     y,
 	}
 
 	r := new(big.Int).SetBytes(ParseStr(fdata.Sig.SIGR))
 	s := new(big.Int).SetBytes(ParseStr(fdata.Sig.SIGS))
-	sig := Signature {
+	sig := Signature{
 		R: r,
 		S: s,
 	}
@@ -295,7 +305,7 @@ func verifySig(msg []byte, sig Signature, pubkey *ecdsa.PublicKey) bool {
 	//填入数据
 	hash.Write(msg)
 	bytes := hash.Sum(nil)
-	// fmt.Printf("hash: %v\n", bytes)
+	// fmt.Printf("hash: %X\n", bytes)
 
 	verify := ecdsa.Verify(pubkey, bytes, r, s)
 	return verify
