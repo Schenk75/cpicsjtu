@@ -57,6 +57,7 @@ type Data struct {
 	SerialNumber string `json:"serialNumber"`
 	SensorType   string `json:"sensorType"`
 	SensorModel  string `json:"sensorModel"`
+	ToTeeTime    string `json:"ToTeeTime"`
 }
 
 // type Data struct {
@@ -177,6 +178,7 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data st
 	curTime := strconv.FormatInt(time.Now().Unix(), 10)
 
 	f, err := os.Open(dataPath + data)
+	// f, err := os.Open("./test2.json")
 
 	if err != nil {
 		fmt.Printf("Cannot open file [Err:%s]", err.Error())
