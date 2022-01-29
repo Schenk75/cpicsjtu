@@ -12,6 +12,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,6 +33,7 @@ import (
 const (
 	createContractTimeout    = 5
 	claimContractName        = "upload001"
+	pubkeyContractName		 = "pubkey002"
 	claimVersion             = "2.0.0"
 	claimByteCodePath        = "./contract/upload.wasm"
 	dataPath                 = "/root/jwzhou/paho.mqtt.c/occlum_instance/result_json/"
@@ -126,7 +128,8 @@ func uploadData(data string) {
 	// 		Value: []byte(fileName),
 	// 	},
 	// }
-	// query(client, "find_by_file_name", kvs)
+	// res := query(client, "find_by_file_name", claimContractName, kvs)
+	// fmt.Println(string(res.Result))
 }
 
 // 创建合约
@@ -143,34 +146,6 @@ func create(client *sdk.ChainClient, withSyncResult bool, usernames ...string) {
 	}
 
 	fmt.Printf("CREATE claim contract resp: %+v\n", resp)
-}
-
-func createUserContract(client *sdk.ChainClient, contractName, version, byteCodePath string, runtime common.RuntimeType,
-	kvs []*common.KeyValuePair, withSyncResult bool, usernames ...string) (*common.TxResponse, error) {
-
-	payload, err := client.CreateContractCreatePayload(contractName, version, byteCodePath, runtime, kvs)
-	if err != nil {
-		return nil, err
-	}
-
-	// endorsers, err := examples.GetEndorsers(payload, usernames...)
-	endorsers, err := examples.GetEndorsersWithAuthType(crypto.HashAlgoMap[client.GetHashType()],
-		client.GetAuthType(), payload, usernames...)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := client.SendContractManageRequest(payload, endorsers, createContractTimeout, withSyncResult)
-	if err != nil {
-		return nil, err
-	}
-
-	err = examples.CheckProposalRequestResp(resp, true)
-	if err != nil {
-		return nil, err
-	}
-
-	return resp, nil
 }
 
 // 调用合约，数据上链
@@ -213,6 +188,7 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data st
 		X:     x,
 		Y:     y,
 	}
+	pubkeyStr, _ := json.Marshal(pubkey)
 
 	r := new(big.Int).SetBytes(ParseStr(fdata.Sig.SIGR))
 	s := new(big.Int).SetBytes(ParseStr(fdata.Sig.SIGS))
@@ -220,17 +196,19 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data st
 		R: r,
 		S: s,
 	}
+	sigStr, _ := json.Marshal(sig)
+	// fmt.Println(string(sig_str))
 
-	if !verifyPk(pubkey) {
+	if !verifyPk(client, pubkeyStr) {
 		return "", errors.New("invalid public key")
+	} else {
+		fmt.Println("[+] Valid public key")
 	}
 	if !verifySig(fileData, sig, &pubkey) {
 		return "", errors.New("invalid signature")
+	} else {
+		fmt.Println("[+] Valid signature")
 	}
-
-	pubkey_str, _ := json.Marshal(pubkey)
-	sig_str, _ := json.Marshal(sig)
-	// fmt.Println(string(sig_str))
 
 	kvs := []*common.KeyValuePair{
 		{
@@ -239,7 +217,7 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data st
 		},
 		{
 			Key:   "file_sig",
-			Value: []byte(sig_str),
+			Value: []byte(sigStr),
 		},
 		{
 			Key:   "file_data",
@@ -251,7 +229,7 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data st
 		},
 		{
 			Key:   "pubkey",
-			Value: []byte(pubkey_str),
+			Value: []byte(pubkeyStr),
 		},
 	}
 
@@ -263,40 +241,32 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data st
 	return fileName, nil
 }
 
-func invokeUserContract(client *sdk.ChainClient, contractName, method, txId string,
-	kvs []*common.KeyValuePair, withSyncResult bool) error {
-
-	resp, err := client.InvokeContract(contractName, method, txId, kvs, -1, withSyncResult)
-	if err != nil {
-		return err
-	}
-
-	if resp.Code != common.TxStatusCode_SUCCESS {
-		return fmt.Errorf("invoke contract failed, [code:%d]/[msg:%s]", resp.Code, resp.Message)
-	}
-
-	if !withSyncResult {
-		fmt.Printf("invoke contract success, resp: [code:%d]/[msg:%s]/[txId:%s]\n", resp.Code, resp.Message, resp.ContractResult.Result)
-	} else {
-		fmt.Printf("invoke contract success, resp: [code:%d]/[msg:%s]/[contractResult:%s]\n", resp.Code, resp.Message, resp.ContractResult)
-	}
-
-	return nil
-}
-
 // 查询链上数据
-func query(client *sdk.ChainClient, method string, kvs []*common.KeyValuePair) {
-	resp, err := client.QueryContract(claimContractName, method, kvs, -1)
+func query(client *sdk.ChainClient, method, contractName string, kvs []*common.KeyValuePair) *common.ContractResult {
+	resp, err := client.QueryContract(contractName, method, kvs, -1)
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	fmt.Printf("QUERY claim contract resp: %+v\n", resp.ContractResult)
+	// fmt.Printf("QUERY claim contract resp: %+v\n", resp.ContractResult)
+	return resp.ContractResult
 }
 
 // 检验公钥是否合法
-func verifyPk(pubkey ecdsa.PublicKey) bool {
-	return true
+func verifyPk(client *sdk.ChainClient, pubkey []byte) bool {
+	hash := sha256.New()
+	//填入数据
+	hash.Write(pubkey)
+	sum := hash.Sum(nil)
+	pubkeyHash := hex.EncodeToString(sum)
+	kvs := []*common.KeyValuePair{
+		{
+			Key:   "pubkey_hash",
+			Value: []byte(pubkeyHash),
+		},
+	}
+	res := query(client, "find_by_pubkey_hash", pubkeyContractName, kvs)
+	return len(res.Result) > 0
 }
 
 // 检验签名
@@ -329,4 +299,53 @@ func ParseStr(str string) []byte {
 	}
 
 	return res
+}
+
+func createUserContract(client *sdk.ChainClient, contractName, version, byteCodePath string, runtime common.RuntimeType,
+	kvs []*common.KeyValuePair, withSyncResult bool, usernames ...string) (*common.TxResponse, error) {
+
+	payload, err := client.CreateContractCreatePayload(contractName, version, byteCodePath, runtime, kvs)
+	if err != nil {
+		return nil, err
+	}
+
+	// endorsers, err := examples.GetEndorsers(payload, usernames...)
+	endorsers, err := examples.GetEndorsersWithAuthType(crypto.HashAlgoMap[client.GetHashType()],
+		client.GetAuthType(), payload, usernames...)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := client.SendContractManageRequest(payload, endorsers, createContractTimeout, withSyncResult)
+	if err != nil {
+		return nil, err
+	}
+
+	err = examples.CheckProposalRequestResp(resp, true)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp, nil
+}
+
+func invokeUserContract(client *sdk.ChainClient, contractName, method, txId string,
+	kvs []*common.KeyValuePair, withSyncResult bool) error {
+
+	resp, err := client.InvokeContract(contractName, method, txId, kvs, -1, withSyncResult)
+	if err != nil {
+		return err
+	}
+
+	if resp.Code != common.TxStatusCode_SUCCESS {
+		return fmt.Errorf("invoke contract failed, [code:%d]/[msg:%s]", resp.Code, resp.Message)
+	}
+
+	if !withSyncResult {
+		fmt.Printf("invoke contract success, resp: [code:%d]/[msg:%s]/[txId:%s]\n", resp.Code, resp.Message, resp.ContractResult.Result)
+	} else {
+		fmt.Printf("invoke contract success, resp: [code:%d]/[msg:%s]/[contractResult:%s]\n", resp.Code, resp.Message, resp.ContractResult)
+	}
+
+	return nil
 }
