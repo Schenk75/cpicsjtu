@@ -10,8 +10,6 @@ package main
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -30,38 +28,12 @@ import (
 
 const (
 	createContractTimeout    = 5
-	claimContractName        = "pubkey002"
+	claimContractName        = "pubkey003"
 	claimVersion             = "2.0.0"
 	claimByteCodePath        = "./contract/pubkey_upload.wasm"
-	dataPath                 = "/root/jwzhou/paho.mqtt.c/occlum_instance/result_json/"
+	pkPath                 	 = "/root/jwzhou/paho.mqtt.c/occlum_instance/pb_json/"
 	sdkConfigOrg1Client1Path = "../sdk_configs/sdk_config_org1_client1.yml"
 )
-
-type FileData struct {
-	Data Data `json:"DATA"`
-	Sig  Sig  `json:"SIG"`
-	Pk   Pk   `json:"PK"`
-}
-
-type Data struct {
-	AvgTemp      string `json:"avg(temp)"`
-	MinTemp      string `json:"min(temp)"`
-	MaxTemp      string `json:"max(temp)"`
-	AvgHum       string `json:"avg(hum)"`
-	MinHum       string `json:"min(hum)"`
-	MaxHum       string `json:"max(hum)"`
-	AvgLig       string `json:"avg(lig)"`
-	MinLig       string `json:"min(lig)"`
-	MaxLig       string `json:"max(lig)"`
-	SerialNumber string `json:"serialNumber"`
-	SensorType   string `json:"sensorType"`
-	SensorModel  string `json:"sensorModel"`
-}
-
-type Sig struct {
-	SIGR string `json:"SIG_r"`
-	SIGS string `json:"SIG_s"`
-}
 
 type Pk struct {
 	PKR string `json:"PK_r"`
@@ -69,10 +41,11 @@ type Pk struct {
 }
 
 func main() {
-	uploadData(os.Args[1])
+	uploadPk(os.Args[1])
 }
 
-func uploadData(data string) {
+
+func uploadPk(pkName string) {
 	fmt.Println("====================== create client ======================")
 	client, err := examples.CreateChainClientWithSDKConf(sdkConfigOrg1Client1Path)
 	if err != nil {
@@ -84,49 +57,22 @@ func uploadData(data string) {
 	create(client, true, usernames...)
 
 	fmt.Println("====================== 调用合约 ======================")
-	pubkeyHash, err := invoke(client, "save", true, data)
+	pkId, err := invoke(client, "save", true, pkName)
 	if err != nil {
 		log.Fatalln(err)
 	}
-	fmt.Println(pubkeyHash)
+	// fmt.Println(pkId)
 
-	// fmt.Println("====================== 执行合约查询接口 ======================")
-	// // f, _ := os.Open("./test2.json")
-	// // defer f.Close()
-	// // byteValue, _ := ioutil.ReadAll(f)
-
-	// // var fdata FileData
-	// // err = json.Unmarshal(byteValue, &fdata)
-	// // if err != nil {
-	// // 	fmt.Println("Unmarshal fail", err.Error())
-	// // }
-	// // // fmt.Printf("fdata: %+v\n", fdata)
-
-	// // x := new(big.Int).SetBytes(ParseStr(fdata.Pk.PKR))
-	// // y := new(big.Int).SetBytes(ParseStr(fdata.Pk.PKS))
-	// // pubkey := ecdsa.PublicKey{
-	// // 	Curve: elliptic.P256(),
-	// // 	X:     x,
-	// // 	Y:     y,
-	// // }
-
-	// // pubkeyStr, _ := json.Marshal(pubkey)
-	// // //计算哈希值
-	// // hash := sha256.New()
-	// // //填入数据
-	// // hash.Write(pubkeyStr)
-	// // sum := hash.Sum(nil)
-	// // pubkeyHash := hex.EncodeToString(sum)
-	// // // pubkeyHash += "1"
-
-	// kvs := []*common.KeyValuePair{
-	// 	{
-	// 		Key:   "pubkey_hash",
-	// 		Value: []byte(pubkeyHash),
-	// 	},
-	// }
-	// res := query(client, "find_by_pubkey_hash", kvs)
-	// fmt.Println(res.Result)
+	fmt.Println("====================== 执行合约查询接口 ======================")
+	// pkId := "20220221T055011Z"
+	kvs := []*common.KeyValuePair{
+		{
+			Key:   "pubkey_id",
+			Value: []byte(pkId),
+		},
+	}
+	res := query(client, "find_by_pubkey_id", kvs)
+	fmt.Println(res)
 }
 
 // 创建合约
@@ -146,11 +92,11 @@ func create(client *sdk.ChainClient, withSyncResult bool, usernames ...string) {
 }
 
 // 调用合约，数据上链
-func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data string) (string, error) {
+func invoke(client *sdk.ChainClient, method string, withSyncResult bool, pkName string) (string, error) {
 	curTime := strconv.FormatInt(time.Now().Unix(), 10)
 
-	// f, err := os.Open(dataPath + data)
-	f, err := os.Open("./test2.json")
+	f, err := os.Open(pkPath + pkName)
+	// f, err := os.Open("./test2.json")
 
 	if err != nil {
 		fmt.Printf("Cannot open file [Err:%s]", err.Error())
@@ -158,32 +104,29 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data st
 	}
 	defer f.Close()
 	byteValue, _ := ioutil.ReadAll(f)
+	// fmt.Println("byteValue: ", string(byteValue))
 
-	var fdata FileData
-	err = json.Unmarshal(byteValue, &fdata)
+	var pk Pk
+	err = json.Unmarshal(byteValue, &pk)
 	if err != nil {
 		fmt.Println("Unmarshal fail", err.Error())
 	}
-	// fmt.Printf("fdata: %+v\n", fdata)
+	fmt.Printf("pk: %+v\n", pk)
 
-	x := new(big.Int).SetBytes(ParseStr(fdata.Pk.PKR))
-	y := new(big.Int).SetBytes(ParseStr(fdata.Pk.PKS))
+	x := new(big.Int).SetBytes(ParseStr(pk.PKR))
+	y := new(big.Int).SetBytes(ParseStr(pk.PKS))
 	pubkey := ecdsa.PublicKey{
 		Curve: elliptic.P256(),
 		X:     x,
 		Y:     y,
 	}
+	fmt.Println("origin pubkey: ", pubkey)
 
 	pubkeyStr, _ := json.Marshal(pubkey)
 	orgid := examples.OrgId1
 
-	//计算哈希值
-	hash := sha256.New()
-	//填入数据
-	hash.Write(pubkeyStr)
-	sum := hash.Sum(nil)
-	pubkeyHash := hex.EncodeToString(sum)
-	// fmt.Println(pubkeyHash)
+	pkId := strings.Split(pkName, ".")[0]
+	fmt.Println("pkId: ", pkId)
 
 	kvs := []*common.KeyValuePair{
 		{
@@ -195,8 +138,8 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data st
 			Value: []byte(pubkeyStr),
 		},
 		{
-			Key:   "pubkey_hash",
-			Value: []byte(pubkeyHash),
+			Key:   "pubkey_id",
+			Value: []byte(pkId),
 		},
 		{
 			Key:   "orgid",
@@ -209,7 +152,7 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data st
 		return "", err
 	}
 
-	return string(pubkeyHash), nil
+	return string(pkId), nil
 }
 
 // 查询链上数据

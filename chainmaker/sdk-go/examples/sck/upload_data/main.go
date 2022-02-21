@@ -12,7 +12,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,7 +32,7 @@ import (
 const (
 	createContractTimeout    = 5
 	claimContractName        = "upload001"
-	pubkeyContractName		 = "pubkey002"
+	pubkeyContractName		 = "pubkey003"
 	claimVersion             = "2.0.0"
 	claimByteCodePath        = "./contract/upload.wasm"
 	dataPath                 = "/root/jwzhou/paho.mqtt.c/occlum_instance/result_json/"
@@ -41,9 +40,10 @@ const (
 )
 
 type FileData struct {
-	Data Data `json:"DATA"`
-	Sig  Sig  `json:"SIG"`
-	Pk   Pk   `json:"PK"`
+	Data 		Data 		`json:"DATA"`
+	Sig  		Sig  		`json:"SIG"`
+	PkFlag  	PkFlag   	`json:"PK_FLAG"`
+	Prediction 	Prediction	`json:"PREDICTION"`
 }
 
 type Data struct {
@@ -62,41 +62,45 @@ type Data struct {
 	ToTeeTime    string `json:"ToTeeTime"`
 }
 
-// type Data struct {
-// 	AvgAirHumidity    string `json:"avg(air_humidity)"`
-// 	MinAirHumidity    string `json:"min(air_humidity)"`
-// 	MaxAirHumidity    string `json:"max(air_humidity)"`
-// 	AvgAirTemperature string `json:"avg(air_temperature)"`
-// 	MinAirTemperature string `json:"min(air_temperature)"`
-// 	MaxAirTemperature string `json:"max(air_temperature)"`
-// 	AvgAtmosphere     string `json:"avg(atmosphere)"`
-// 	MinAtmosphere     string `json:"min(atmosphere)"`
-// 	MaxAtmosphere     string `json:"max(atmosphere)"`
-// 	AvgCo             string `json:"avg(co)"`
-// 	MinCo             string `json:"min(co)"`
-// 	MaxCo             string `json:"max(co)"`
-// 	AvgNo2            string `json:"avg(no2)"`
-// 	MinNo2            string `json:"min(no2)"`
-// 	MaxNo2            string `json:"max(no2)"`
-// 	AvgO3             string `json:"avg(o3)"`
-// 	MinO3             string `json:"min(o3)"`
-// 	MaxO3             string `json:"max(o3)"`
-// }
-
 type Sig struct {
 	SIGR string `json:"SIG_r"`
 	SIGS string `json:"SIG_s"`
 }
 
-type Pk struct {
-	PKR string `json:"PK_r"`
-	PKS string `json:"PK_s"`
+type PkFlag struct {
+	ID string `json:"id"`
+}
+
+type Prediction struct {
+	TempAfter30Mins float64 `json:"Temp_After_30mins"`
 }
 
 // 经过处理的签名
 type Signature struct {
 	R *big.Int
 	S *big.Int
+}
+
+// 从链上读取的已注册公钥信息
+type PkFromChain struct {
+	Pubkey   string `json:"pubkey"`
+	PubkeyID string `json:"pubkey_id"`
+	Orgid    string `json:"orgid"`
+	Time     int    `json:"time"`
+}
+
+type PkCurve struct {
+	Curve struct {
+		P       *big.Int  	`json:"P"`
+		N       *big.Int  	`json:"N"`
+		B       *big.Int  	`json:"B"`
+		Gx      *big.Int  	`json:"Gx"`
+		Gy      *big.Int  	`json:"Gy"`
+		BitSize int    		`json:"BitSize"`
+		Name    string 		`json:"Name"`
+	} `json:"Curve"`
+	X *big.Int `json:"X"`
+	Y *big.Int `json:"Y"`
 }
 
 func main() {
@@ -119,7 +123,7 @@ func uploadData(data string) {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	fmt.Println(fileName)
+	fmt.Println("file name: ", fileName)
 
 	// fmt.Println("====================== 执行合约查询接口 ======================")
 	// kvs := []*common.KeyValuePair{
@@ -152,8 +156,8 @@ func create(client *sdk.ChainClient, withSyncResult bool, usernames ...string) {
 func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data string) (string, error) {
 	curTime := strconv.FormatInt(time.Now().Unix(), 10)
 
-	f, err := os.Open(dataPath + data)
-	// f, err := os.Open("./test2.json")
+	// f, err := os.Open(dataPath + data)
+	f, err := os.Open("./test2.json")
 
 	if err != nil {
 		fmt.Printf("Cannot open file [Err:%s]", err.Error())
@@ -177,17 +181,37 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data st
 	// fmt.Println(fileData)
 
 	fileName := fmt.Sprintf("file_%s", curTime)
-
 	// fmt.Println(fdata)
 
-	x := new(big.Int).SetBytes(ParseStr(fdata.Pk.PKR))
-	y := new(big.Int).SetBytes(ParseStr(fdata.Pk.PKS))
+	// 根据PkFlag从链上读取公钥
+	pkId := fdata.PkFlag.ID
+	getPkRes := verifyPk(client, pkId)
+	if len(getPkRes.Result) == 0 {
+		return "", errors.New("invalid public key")
+	}
+	fmt.Println("[+] Valid public key")
+
+	var pkfc PkFromChain
+	err = json.Unmarshal(getPkRes.Result, &pkfc)
+	if err != nil {
+		fmt.Println("Unmarshal fail", err.Error())
+	}
+	// fmt.Printf("Pk From Chain: %+v\n", pkfc)
+	// fmt.Println(pkfc.Pubkey)
+
+	var pkCurve PkCurve
+	err = json.Unmarshal([]byte(pkfc.Pubkey), &pkCurve)
+	if err != nil {
+		fmt.Println("Unmarshal fail", err.Error())
+	}
+	// fmt.Printf("Pk Curve: %+v\n", pkCurve)
 
 	pubkey := ecdsa.PublicKey{
 		Curve: elliptic.P256(),
-		X:     x,
-		Y:     y,
+		X:     pkCurve.X,
+		Y:     pkCurve.Y,
 	}
+	// fmt.Println("pubkey: ", pubkey)
 	pubkeyStr, _ := json.Marshal(pubkey)
 
 	r := new(big.Int).SetBytes(ParseStr(fdata.Sig.SIGR))
@@ -199,11 +223,6 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data st
 	sigStr, _ := json.Marshal(sig)
 	// fmt.Println(string(sig_str))
 
-	if !verifyPk(client, pubkeyStr) {
-		return "", errors.New("invalid public key")
-	} else {
-		fmt.Println("[+] Valid public key")
-	}
 	if !verifySig(fileData, sig, &pubkey) {
 		return "", errors.New("invalid signature")
 	} else {
@@ -253,20 +272,15 @@ func query(client *sdk.ChainClient, method, contractName string, kvs []*common.K
 }
 
 // 检验公钥是否合法
-func verifyPk(client *sdk.ChainClient, pubkey []byte) bool {
-	hash := sha256.New()
-	//填入数据
-	hash.Write(pubkey)
-	sum := hash.Sum(nil)
-	pubkeyHash := hex.EncodeToString(sum)
+func verifyPk(client *sdk.ChainClient, pkId string) *common.ContractResult {
 	kvs := []*common.KeyValuePair{
 		{
-			Key:   "pubkey_hash",
-			Value: []byte(pubkeyHash),
+			Key:   "pubkey_id",
+			Value: []byte(pkId),
 		},
 	}
-	res := query(client, "find_by_pubkey_hash", pubkeyContractName, kvs)
-	return len(res.Result) > 0
+	res := query(client, "find_by_pubkey_id", pubkeyContractName, kvs)
+	return res
 }
 
 // 检验签名

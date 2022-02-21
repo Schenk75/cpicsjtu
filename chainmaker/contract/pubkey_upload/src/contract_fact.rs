@@ -26,7 +26,7 @@ pub extern "C" fn upgrade() {
 
 struct Fact {
     pubkey: String,
-    pubkey_hash: String,
+    pubkey_id: String,
     orgid: String,
     time: i32,
     ec: EasyCodec,
@@ -34,15 +34,15 @@ struct Fact {
 
 #[allow(dead_code)]
 impl Fact {
-    fn new_fact(pubkey: String, pubkey_hash: String, orgid: String, time: i32) -> Fact {
+    fn new_fact(pubkey: String, pubkey_id: String, orgid: String, time: i32) -> Fact {
         let mut ec = EasyCodec::new();
         ec.add_string("pubkey", pubkey.as_str());
-        ec.add_string("pubkey_hash", pubkey.as_str());
+        ec.add_string("pubkey_id", pubkey_id.as_str());
         ec.add_string("orgid", orgid.as_str());
         ec.add_i32("time", time);
         Fact {
             pubkey,
-            pubkey_hash,
+            pubkey_id,
             orgid,
             time,
             ec,
@@ -52,7 +52,7 @@ impl Fact {
     fn get_emit_event_data(&self) -> Vec<String> {
         let mut arr: Vec<String> = Vec::new();
         arr.push(self.pubkey.clone());
-        arr.push(self.pubkey_hash.clone());
+        arr.push(self.pubkey_id.clone());
         arr.push(self.orgid.clone());
         arr.push(self.time.to_string());
         arr
@@ -70,7 +70,7 @@ impl Fact {
         let ec = EasyCodec::new_with_bytes(data);
         Fact {
             pubkey:         ec.get_string("pubkey").unwrap(),
-            pubkey_hash:    ec.get_string("pubkey_hash").unwrap(),
+            pubkey_id:      ec.get_string("pubkey_id").unwrap(),
             orgid:          ec.get_string("orgid").unwrap(),
             time:           ec.get_i32("time").unwrap(),
             ec,
@@ -86,7 +86,7 @@ pub extern "C" fn save() {
 
     // 获取传入参数
     let pubkey = ctx.arg_as_utf8_str("pubkey");
-    let pubkey_hash = ctx.arg_as_utf8_str("pubkey_hash");
+    let pubkey_id = ctx.arg_as_utf8_str("pubkey_id");
     let orgid = ctx.arg_as_utf8_str("orgid");
     let time_str = ctx.arg_as_utf8_str("time");
 
@@ -99,7 +99,7 @@ pub extern "C" fn save() {
         return;
     }
     let time: i32 = r_i32.unwrap();
-    let fact = Fact::new_fact(pubkey, pubkey_hash, orgid, time);
+    let fact = Fact::new_fact(pubkey, pubkey_id, orgid, time);
 
     // 事件
     ctx.emit_event("topic_vx", &fact.get_emit_event_data());
@@ -107,29 +107,29 @@ pub extern "C" fn save() {
     // 序列化后存储
     ctx.put_state(
         "fact_ec",
-        fact.pubkey_hash.as_str(),
+        fact.pubkey_id.as_str(),
         fact.marshal().as_slice(),
     );
 }
 
-// 根据pubkey_hash查询该公钥是否已经在链上注册
+// 根据pubkey_id查询该公钥是否已经在链上注册
 #[no_mangle]
-pub extern "C" fn find_by_pubkey_hash() {
+pub extern "C" fn find_by_pubkey_id() {
     // 获取上下文
     let ctx = &mut sim_context::get_sim_context();
 
     // 获取传入参数
-    let pubkey_hash = ctx.arg_as_utf8_str("pubkey_hash");
+    let pubkey_id = ctx.arg_as_utf8_str("pubkey_id");
 
     // 校验参数
-    if pubkey_hash.len() == 0 {
-        ctx.log("pubkey hash is null");
+    if pubkey_id.len() == 0 {
+        ctx.log("pubkey id is null");
         ctx.ok("".as_bytes());
         return;
     }
 
     // 查询
-    let r = ctx.get_state("fact_ec", &pubkey_hash);
+    let r = ctx.get_state("fact_ec", &pubkey_id);
 
     // 校验返回结果
     if r.is_err() {
