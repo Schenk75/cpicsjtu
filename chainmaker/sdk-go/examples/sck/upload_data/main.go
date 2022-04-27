@@ -34,9 +34,9 @@ const (
 	claimContractName        = "upload001"
 	pubkeyContractName		 = "pubkey003"
 	claimVersion             = "2.0.0"
-	claimByteCodePath        = "./contract/upload.wasm"
+	claimByteCodePath        = "/root/chainmaker/sdk-go/examples/sck/contract/upload.wasm"
 	dataPath                 = "/root/jwzhou/paho.mqtt.c/occlum_instance/result_json/"
-	sdkConfigOrg1Client1Path = "../sdk_configs/sdk_config_org1_client1.yml"
+	sdkConfigOrg1Client1Path = "/root/chainmaker/sdk-go/examples/sdk_configs/sdk_config_org1_client1.yml"
 )
 
 type FileData struct {
@@ -107,33 +107,36 @@ func main() {
 	uploadData(os.Args[1])
 }
 
-func uploadData(data string) {
+func uploadData(data string) bool {
 	fmt.Println("====================== create client ======================")
 	client, err := examples.CreateChainClientWithSDKConf(sdkConfigOrg1Client1Path)
 	if err != nil {
-		log.Fatalln(err)
+		log.Printf("%v", err)
+		return false
 	}
 
-	// fmt.Println("====================== 创建合约 ======================")
-	// usernames := []string{examples.UserNameOrg1Admin1, examples.UserNameOrg2Admin1, examples.UserNameOrg3Admin1, examples.UserNameOrg4Admin1}
-	// create(client, true, usernames...)
+	fmt.Println("====================== 创建合约 ======================")
+	usernames := []string{examples.UserNameOrg1Admin1, examples.UserNameOrg2Admin1, examples.UserNameOrg3Admin1, examples.UserNameOrg4Admin1}
+	create(client, true, usernames...)
 
 	fmt.Println("====================== 调用合约 ======================")
 	fileName, err := invoke(client, "save", true, data)
 	if err != nil {
-		log.Fatalln(err)
+		log.Printf("%v", err)
+		return false
 	}
 	fmt.Println("file name: ", fileName)
 
-	// fmt.Println("====================== 执行合约查询接口 ======================")
-	// kvs := []*common.KeyValuePair{
-	// 	{
-	// 		Key:   "file_name",
-	// 		Value: []byte(fileName),
-	// 	},
-	// }
-	// res := query(client, "find_by_file_name", claimContractName, kvs)
-	// fmt.Println(string(res.Result))
+	fmt.Println("====================== 执行合约查询接口 ======================")
+	kvs := []*common.KeyValuePair{
+		{
+			Key:   "file_name",
+			Value: []byte(fileName),
+		},
+	}
+	res := query(client, "find_by_file_name", claimContractName, kvs)
+	fmt.Println(string(res.Result))
+	return true
 }
 
 // 创建合约
@@ -142,6 +145,7 @@ func create(client *sdk.ChainClient, withSyncResult bool, usernames ...string) {
 		common.RuntimeType_WASMER, []*common.KeyValuePair{}, withSyncResult, usernames...)
 
 	if err != nil {
+		// 合约已存在，直接执行
 		if err.Error() == "contract exist" {
 			fmt.Println("contract exist")
 			return
@@ -156,61 +160,14 @@ func create(client *sdk.ChainClient, withSyncResult bool, usernames ...string) {
 func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data string) (string, error) {
 	curTime := strconv.FormatInt(time.Now().Unix(), 10)
 
-	// f, err := os.Open(dataPath + data)
-	f, err := os.Open("./test2.json")
-
-	if err != nil {
-		fmt.Printf("Cannot open file [Err:%s]", err.Error())
-		return "", err
-	}
-	defer f.Close()
-	byteValue, _ := ioutil.ReadAll(f)
-
-	var fdata FileData
-	err = json.Unmarshal(byteValue, &fdata)
-	if err != nil {
-		fmt.Println("Unmarshal fail", err.Error())
-	}
-	// fmt.Printf("fdata: %+v\n", fdata)
-
-	bf := bytes.NewBuffer([]byte{})
-	jsonEncoder := json.NewEncoder(bf)
-	jsonEncoder.SetEscapeHTML(false)
-	jsonEncoder.Encode(fdata.Data)
-	fileData := []byte(strings.TrimSpace(bf.String()))
-	// fmt.Println(fileData)
+	fdata, fileData := readDataFromFile(dataPath + data)
 
 	fileName := fmt.Sprintf("file_%s", curTime)
 	// fmt.Println(fdata)
 
 	// 根据PkFlag从链上读取公钥
-	pkId := fdata.PkFlag.ID
-	getPkRes := verifyPk(client, pkId)
-	if len(getPkRes.Result) == 0 {
-		return "", errors.New("invalid public key")
-	}
-	fmt.Println("[+] Valid public key")
-
-	var pkfc PkFromChain
-	err = json.Unmarshal(getPkRes.Result, &pkfc)
-	if err != nil {
-		fmt.Println("Unmarshal fail", err.Error())
-	}
-	// fmt.Printf("Pk From Chain: %+v\n", pkfc)
-	// fmt.Println(pkfc.Pubkey)
-
-	var pkCurve PkCurve
-	err = json.Unmarshal([]byte(pkfc.Pubkey), &pkCurve)
-	if err != nil {
-		fmt.Println("Unmarshal fail", err.Error())
-	}
-	// fmt.Printf("Pk Curve: %+v\n", pkCurve)
-
-	pubkey := ecdsa.PublicKey{
-		Curve: elliptic.P256(),
-		X:     pkCurve.X,
-		Y:     pkCurve.Y,
-	}
+	pubkey := getPkFromChain(client, fdata.PkFlag.ID)
+	
 	// fmt.Println("pubkey: ", pubkey)
 	pubkeyStr, _ := json.Marshal(pubkey)
 
@@ -223,7 +180,7 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data st
 	sigStr, _ := json.Marshal(sig)
 	// fmt.Println(string(sig_str))
 
-	if !verifySig(fileData, sig, &pubkey) {
+	if !verifySig(fileData, sig, pubkey) {
 		return "", errors.New("invalid signature")
 	} else {
 		fmt.Println("[+] Valid signature")
@@ -252,7 +209,7 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data st
 		},
 	}
 
-	err = invokeUserContract(client, claimContractName, method, "", kvs, withSyncResult)
+	err := invokeUserContract(client, claimContractName, method, "", kvs, withSyncResult)
 	if err != nil {
 		return "", err
 	}
@@ -272,7 +229,7 @@ func query(client *sdk.ChainClient, method, contractName string, kvs []*common.K
 }
 
 // 检验公钥是否合法
-func verifyPk(client *sdk.ChainClient, pkId string) *common.ContractResult {
+func verifyPk(client *sdk.ChainClient, pkId string) (*common.ContractResult, bool) {
 	kvs := []*common.KeyValuePair{
 		{
 			Key:   "pubkey_id",
@@ -280,7 +237,7 @@ func verifyPk(client *sdk.ChainClient, pkId string) *common.ContractResult {
 		},
 	}
 	res := query(client, "find_by_pubkey_id", pubkeyContractName, kvs)
-	return res
+	return res, true
 }
 
 // 检验签名
@@ -313,6 +270,62 @@ func ParseStr(str string) []byte {
 	}
 
 	return res
+}
+
+// 从文件读出数据
+func readDataFromFile(fileName string) (FileData, []byte) {
+	f, err := os.Open(fileName)
+	// f, err := os.Open("./test_data.json")
+
+	if err != nil {
+		log.Fatalf("Cannot open file [Err:%s]", err.Error())
+	}
+	defer f.Close()
+	byteValue, _ := ioutil.ReadAll(f)
+
+	var fdata FileData
+	err = json.Unmarshal(byteValue, &fdata)
+	if err != nil {
+		log.Fatalf("Unmarshal fail %s", err.Error())
+	}
+	// fmt.Printf("fdata: %+v\n", fdata)
+
+	bf := bytes.NewBuffer([]byte{})
+	jsonEncoder := json.NewEncoder(bf)
+	jsonEncoder.SetEscapeHTML(false)
+	jsonEncoder.Encode(fdata.Data)
+	fileData := []byte(strings.TrimSpace(bf.String()))
+	// fmt.Println(fileData)
+	return fdata, fileData
+}
+
+func getPkFromChain(client *sdk.ChainClient, pkId string) *ecdsa.PublicKey {
+	getPkRes, _ := verifyPk(client, pkId)
+	if len(getPkRes.Result) == 0 {
+		log.Fatalln("invalid public key")
+	}
+	fmt.Println("[+] Valid public key")
+
+	var pkfc PkFromChain
+	err := json.Unmarshal(getPkRes.Result, &pkfc)
+	if err != nil {
+		log.Fatalln("Unmarshal fail", err.Error())
+	}
+	// fmt.Printf("Pk From Chain: %+v\n", pkfc)
+	// fmt.Println(pkfc.Pubkey)
+
+	var pkCurve PkCurve
+	err = json.Unmarshal([]byte(pkfc.Pubkey), &pkCurve)
+	if err != nil {
+		fmt.Println("Unmarshal fail", err.Error())
+	}
+	// fmt.Printf("Pk Curve: %+v\n", pkCurve)
+
+	return &ecdsa.PublicKey{
+		Curve: elliptic.P256(),
+		X:     pkCurve.X,
+		Y:     pkCurve.Y,
+	}
 }
 
 func createUserContract(client *sdk.ChainClient, contractName, version, byteCodePath string, runtime common.RuntimeType,

@@ -30,9 +30,9 @@ const (
 	createContractTimeout    = 5
 	claimContractName        = "pubkey003"
 	claimVersion             = "2.0.0"
-	claimByteCodePath        = "./contract/pubkey_upload.wasm"
-	pkPath                 	 = "/root/jwzhou/paho.mqtt.c/occlum_instance/pb_json/"
-	sdkConfigOrg1Client1Path = "../sdk_configs/sdk_config_org1_client1.yml"
+	claimByteCodePath        = "/root/chainmaker/sdk-go/examples/sck/contract/pubkey_upload.wasm"
+	pkPath                   = "/root/jwzhou/paho.mqtt.c/occlum_instance/pb_json/"
+	sdkConfigOrg1Client1Path = "/root/chainmaker/sdk-go/examples/sdk_configs/sdk_config_org1_client1.yml"
 )
 
 type Pk struct {
@@ -44,12 +44,12 @@ func main() {
 	uploadPk(os.Args[1])
 }
 
-
-func uploadPk(pkName string) {
+func uploadPk(pkName string) bool {
 	fmt.Println("====================== create client ======================")
 	client, err := examples.CreateChainClientWithSDKConf(sdkConfigOrg1Client1Path)
 	if err != nil {
-		log.Fatalln(err)
+		log.Printf("%v\n", err)
+		return false
 	}
 
 	fmt.Println("====================== 创建合约 ======================")
@@ -59,7 +59,8 @@ func uploadPk(pkName string) {
 	fmt.Println("====================== 调用合约 ======================")
 	pkId, err := invoke(client, "save", true, pkName)
 	if err != nil {
-		log.Fatalln(err)
+		log.Printf("%v\n", err)
+		return false
 	}
 	// fmt.Println(pkId)
 
@@ -73,6 +74,8 @@ func uploadPk(pkName string) {
 	}
 	res := query(client, "find_by_pubkey_id", kvs)
 	fmt.Println(res)
+
+	return true
 }
 
 // 创建合约
@@ -81,6 +84,7 @@ func create(client *sdk.ChainClient, withSyncResult bool, usernames ...string) {
 		common.RuntimeType_WASMER, []*common.KeyValuePair{}, withSyncResult, usernames...)
 
 	if err != nil {
+		// 合约已存在，直接执行
 		if err.Error() == "contract exist" {
 			fmt.Println("contract exist")
 			return
@@ -183,6 +187,7 @@ func ParseStr(str string) []byte {
 
 	return res
 }
+
 
 func createUserContract(client *sdk.ChainClient, contractName, version, byteCodePath string, runtime common.RuntimeType,
 	kvs []*common.KeyValuePair, withSyncResult bool, usernames ...string) (*common.TxResponse, error) {
