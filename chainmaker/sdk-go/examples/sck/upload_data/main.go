@@ -37,7 +37,14 @@ const (
 	claimByteCodePath        = "/root/chainmaker/sdk-go/examples/sck/contract/upload.wasm"
 	dataPath                 = "/root/jwzhou/paho.mqtt.c/occlum_instance/result_json/"
 	sdkConfigOrg1Client1Path = "/root/chainmaker/sdk-go/examples/sdk_configs/sdk_config_org1_client1.yml"
+	printLog 				 = true
 )
+
+func PrintLog(format string, a ...interface{}) {
+	if printLog {
+		log.Printf(format, a...)
+	}
+}
 
 type FileData struct {
 	Data 		Data 		`json:"DATA"`
@@ -109,25 +116,32 @@ func main() {
 
 func uploadData(data string) bool {
 	fmt.Println("====================== create client ======================")
+	start := time.Now()
 	client, err := examples.CreateChainClientWithSDKConf(sdkConfigOrg1Client1Path)
 	if err != nil {
 		log.Printf("%v", err)
 		return false
 	}
+	fmt.Println("time: ", time.Since(start))
 
-	fmt.Println("====================== 创建合约 ======================")
-	usernames := []string{examples.UserNameOrg1Admin1, examples.UserNameOrg2Admin1, examples.UserNameOrg3Admin1, examples.UserNameOrg4Admin1}
-	create(client, true, usernames...)
+	// fmt.Println("====================== 创建合约 ======================")
+	// start = time.Now()
+	// usernames := []string{examples.UserNameOrg1Admin1, examples.UserNameOrg2Admin1, examples.UserNameOrg3Admin1, examples.UserNameOrg4Admin1}
+	// create(client, true, usernames...)
+	// fmt.Println("time: ", time.Since(start))
 
 	fmt.Println("====================== 调用合约 ======================")
+	start = time.Now()
 	fileName, err := invoke(client, "save", true, data)
 	if err != nil {
 		log.Printf("%v", err)
 		return false
 	}
-	fmt.Println("file name: ", fileName)
+	PrintLog("file name: %v\n", fileName)
+	fmt.Println("time: ", time.Since(start))
 
 	fmt.Println("====================== 执行合约查询接口 ======================")
+	start = time.Now()
 	kvs := []*common.KeyValuePair{
 		{
 			Key:   "file_name",
@@ -135,7 +149,8 @@ func uploadData(data string) bool {
 		},
 	}
 	res := query(client, "find_by_file_name", claimContractName, kvs)
-	fmt.Println(string(res.Result))
+	PrintLog(string(res.Result))
+	fmt.Println("time: ", time.Since(start))
 	return true
 }
 
@@ -147,13 +162,13 @@ func create(client *sdk.ChainClient, withSyncResult bool, usernames ...string) {
 	if err != nil {
 		// 合约已存在，直接执行
 		if err.Error() == "contract exist" {
-			fmt.Println("contract exist")
+			PrintLog("contract exist")
 			return
 		}
 		log.Fatalln(err)
 	}
 
-	fmt.Printf("CREATE claim contract resp: %+v\n", resp)
+	PrintLog("CREATE claim contract resp: %+v\n", resp)
 }
 
 // 调用合约，数据上链
@@ -166,7 +181,9 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data st
 	// fmt.Println(fdata)
 
 	// 根据PkFlag从链上读取公钥
+	start := time.Now()
 	pubkey := getPkFromChain(client, fdata.PkFlag.ID)
+	fmt.Println("get pk time: ", time.Since(start))
 	
 	// fmt.Println("pubkey: ", pubkey)
 	pubkeyStr, _ := json.Marshal(pubkey)
@@ -180,11 +197,13 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, data st
 	sigStr, _ := json.Marshal(sig)
 	// fmt.Println(string(sig_str))
 
+	start = time.Now()
 	if !verifySig(fileData, sig, pubkey) {
 		return "", errors.New("invalid signature")
 	} else {
-		fmt.Println("[+] Valid signature")
+		PrintLog("[+] Valid signature")
 	}
+	fmt.Println("verify sig time: ", time.Since(start))
 
 	kvs := []*common.KeyValuePair{
 		{
@@ -224,7 +243,7 @@ func query(client *sdk.ChainClient, method, contractName string, kvs []*common.K
 		log.Fatalln(err)
 	}
 
-	// fmt.Printf("QUERY claim contract resp: %+v\n", resp.ContractResult)
+	// PrintLog("QUERY claim contract resp: %+v\n", resp.ContractResult)
 	return resp.ContractResult
 }
 
@@ -236,6 +255,7 @@ func verifyPk(client *sdk.ChainClient, pkId string) (*common.ContractResult, boo
 			Value: []byte(pkId),
 		},
 	}
+
 	res := query(client, "find_by_pubkey_id", pubkeyContractName, kvs)
 	return res, true
 }
@@ -248,7 +268,7 @@ func verifySig(msg []byte, sig Signature, pubkey *ecdsa.PublicKey) bool {
 	//填入数据
 	hash.Write(msg)
 	bytes := hash.Sum(nil)
-	// fmt.Printf("hash: %X\n", bytes)
+	// PrintLog("hash: %X\n", bytes)
 
 	verify := ecdsa.Verify(pubkey, bytes, r, s)
 	return verify
@@ -288,7 +308,7 @@ func readDataFromFile(fileName string) (FileData, []byte) {
 	if err != nil {
 		log.Fatalf("Unmarshal fail %s", err.Error())
 	}
-	// fmt.Printf("fdata: %+v\n", fdata)
+	// PrintLog("fdata: %+v\n", fdata)
 
 	bf := bytes.NewBuffer([]byte{})
 	jsonEncoder := json.NewEncoder(bf)
@@ -299,19 +319,20 @@ func readDataFromFile(fileName string) (FileData, []byte) {
 	return fdata, fileData
 }
 
+// 根据id从链上获取已注册的公钥
 func getPkFromChain(client *sdk.ChainClient, pkId string) *ecdsa.PublicKey {
 	getPkRes, _ := verifyPk(client, pkId)
 	if len(getPkRes.Result) == 0 {
 		log.Fatalln("invalid public key")
 	}
-	fmt.Println("[+] Valid public key")
+	PrintLog("[+] Valid public key")
 
 	var pkfc PkFromChain
 	err := json.Unmarshal(getPkRes.Result, &pkfc)
 	if err != nil {
 		log.Fatalln("Unmarshal fail", err.Error())
 	}
-	// fmt.Printf("Pk From Chain: %+v\n", pkfc)
+	// PrintLog("Pk From Chain: %+v\n", pkfc)
 	// fmt.Println(pkfc.Pubkey)
 
 	var pkCurve PkCurve
@@ -319,7 +340,7 @@ func getPkFromChain(client *sdk.ChainClient, pkId string) *ecdsa.PublicKey {
 	if err != nil {
 		fmt.Println("Unmarshal fail", err.Error())
 	}
-	// fmt.Printf("Pk Curve: %+v\n", pkCurve)
+	// PrintLog("Pk Curve: %+v\n", pkCurve)
 
 	return &ecdsa.PublicKey{
 		Curve: elliptic.P256(),
@@ -369,9 +390,9 @@ func invokeUserContract(client *sdk.ChainClient, contractName, method, txId stri
 	}
 
 	if !withSyncResult {
-		fmt.Printf("invoke contract success, resp: [code:%d]/[msg:%s]/[txId:%s]\n", resp.Code, resp.Message, resp.ContractResult.Result)
+		PrintLog("invoke contract success, resp: [code:%d]/[msg:%s]/[txId:%s]\n", resp.Code, resp.Message, resp.ContractResult.Result)
 	} else {
-		fmt.Printf("invoke contract success, resp: [code:%d]/[msg:%s]/[contractResult:%s]\n", resp.Code, resp.Message, resp.ContractResult)
+		PrintLog("invoke contract success, resp: [code:%d]/[msg:%s]/[contractResult:%s]\n", resp.Code, resp.Message, resp.ContractResult)
 	}
 
 	return nil

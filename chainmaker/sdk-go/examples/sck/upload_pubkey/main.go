@@ -33,7 +33,14 @@ const (
 	claimByteCodePath        = "/root/chainmaker/sdk-go/examples/sck/contract/pubkey_upload.wasm"
 	pkPath                   = "/root/jwzhou/paho.mqtt.c/occlum_instance/pb_json/"
 	sdkConfigOrg1Client1Path = "/root/chainmaker/sdk-go/examples/sdk_configs/sdk_config_org1_client1.yml"
+	printLog				 = false
 )
+
+func PrintLog(format string, a ...interface{}) {
+	if printLog {
+		log.Printf(format, a...)
+	}
+}
 
 type Pk struct {
 	PKR string `json:"PK_r"`
@@ -46,25 +53,32 @@ func main() {
 
 func uploadPk(pkName string) bool {
 	fmt.Println("====================== create client ======================")
+	start := time.Now()
 	client, err := examples.CreateChainClientWithSDKConf(sdkConfigOrg1Client1Path)
 	if err != nil {
 		log.Printf("%v\n", err)
 		return false
 	}
+	fmt.Println("time: ", time.Since(start))
 
 	fmt.Println("====================== 创建合约 ======================")
+	start = time.Now()
 	usernames := []string{examples.UserNameOrg1Admin1, examples.UserNameOrg2Admin1, examples.UserNameOrg3Admin1, examples.UserNameOrg4Admin1}
 	create(client, true, usernames...)
+	fmt.Println("time: ", time.Since(start))
 
 	fmt.Println("====================== 调用合约 ======================")
+	start = time.Now()
 	pkId, err := invoke(client, "save", true, pkName)
 	if err != nil {
 		log.Printf("%v\n", err)
 		return false
 	}
 	// fmt.Println(pkId)
+	fmt.Println("time: ", time.Since(start))
 
 	fmt.Println("====================== 执行合约查询接口 ======================")
+	start = time.Now()
 	// pkId := "20220221T055011Z"
 	kvs := []*common.KeyValuePair{
 		{
@@ -73,7 +87,8 @@ func uploadPk(pkName string) bool {
 		},
 	}
 	res := query(client, "find_by_pubkey_id", kvs)
-	fmt.Println(res)
+	PrintLog("%v\n", res)
+	fmt.Println("time: ", time.Since(start))
 
 	return true
 }
@@ -86,13 +101,13 @@ func create(client *sdk.ChainClient, withSyncResult bool, usernames ...string) {
 	if err != nil {
 		// 合约已存在，直接执行
 		if err.Error() == "contract exist" {
-			fmt.Println("contract exist")
+			PrintLog("contract exist")
 			return
 		}
 		log.Fatalln(err)
 	}
 
-	fmt.Printf("CREATE claim contract resp: %+v\n", resp)
+	PrintLog("CREATE claim contract resp: %+v\n", resp)
 }
 
 // 调用合约，数据上链
@@ -103,7 +118,7 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, pkName 
 	// f, err := os.Open("./test2.json")
 
 	if err != nil {
-		fmt.Printf("Cannot open file [Err:%s]", err.Error())
+		PrintLog("Cannot open file [Err:%s]", err.Error())
 		return "", err
 	}
 	defer f.Close()
@@ -115,7 +130,7 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, pkName 
 	if err != nil {
 		fmt.Println("Unmarshal fail", err.Error())
 	}
-	fmt.Printf("pk: %+v\n", pk)
+	PrintLog("pk: %+v\n", pk)
 
 	x := new(big.Int).SetBytes(ParseStr(pk.PKR))
 	y := new(big.Int).SetBytes(ParseStr(pk.PKS))
@@ -124,13 +139,13 @@ func invoke(client *sdk.ChainClient, method string, withSyncResult bool, pkName 
 		X:     x,
 		Y:     y,
 	}
-	fmt.Println("origin pubkey: ", pubkey)
+	PrintLog("origin pubkey: %v\n", pubkey)
 
 	pubkeyStr, _ := json.Marshal(pubkey)
 	orgid := examples.OrgId1
 
 	pkId := strings.Split(pkName, ".")[0]
-	fmt.Println("pkId: ", pkId)
+	// fmt.Println("pkId: ", pkId)
 
 	kvs := []*common.KeyValuePair{
 		{
@@ -166,7 +181,7 @@ func query(client *sdk.ChainClient, method string, kvs []*common.KeyValuePair) *
 		log.Fatalln(err)
 	}
 
-	// fmt.Printf("QUERY claim contract resp: %+v\n", resp.ContractResult)
+	// PrintLog("QUERY claim contract resp: %+v\n", resp.ContractResult)
 	return resp.ContractResult
 }
 
@@ -230,9 +245,9 @@ func invokeUserContract(client *sdk.ChainClient, contractName, method, txId stri
 	}
 
 	if !withSyncResult {
-		fmt.Printf("invoke contract success, resp: [code:%d]/[msg:%s]/[txId:%s]\n", resp.Code, resp.Message, resp.ContractResult.Result)
+		PrintLog("invoke contract success, resp: [code:%d]/[msg:%s]/[txId:%s]\n", resp.Code, resp.Message, resp.ContractResult.Result)
 	} else {
-		fmt.Printf("invoke contract success, resp: [code:%d]/[msg:%s]/[contractResult:%s]\n", resp.Code, resp.Message, resp.ContractResult)
+		PrintLog("invoke contract success, resp: [code:%d]/[msg:%s]/[contractResult:%s]\n", resp.Code, resp.Message, resp.ContractResult)
 	}
 
 	return nil
